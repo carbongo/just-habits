@@ -178,7 +178,104 @@ struct ContentView: View {
     }
 }
 
-#Preview {
-    ContentView()
+#if DEBUG
+private enum ContentPreviewData {
+    static func seedIfNeeded(in modelContext: ModelContext) {
+        let existingHabits = (try? modelContext.fetch(FetchDescriptor<Habit>())) ?? []
+        guard existingHabits.isEmpty else {
+            return
+        }
+
+        let morningWalk = Habit(
+            title: "Morning Walk",
+            kind: .achieving,
+            trigger: .time(DateComponents(hour: 7, minute: 30))
+        )
+        let noSugar = Habit(
+            title: "No Sugar",
+            kind: .skipping,
+            trigger: .time(DateComponents(hour: 21, minute: 0))
+        )
+        let stretch = Habit(
+            title: "Stretch",
+            kind: .achieving,
+            trigger: .chain(morningWalk.id)
+        )
+        let journaling = Habit(
+            title: "Journal",
+            kind: .achieving,
+            trigger: .time(DateComponents(hour: 22, minute: 0))
+        )
+
+        [morningWalk, noSugar, stretch, journaling].forEach { modelContext.insert($0) }
+
+        let today = DayKey.from(Date())
+        let yesterdayDate = Calendar.current.date(byAdding: .day, value: -1, to: Date()) ?? Date()
+        let yesterday = DayKey.from(yesterdayDate)
+
+        let records = [
+            HabitDayRecord(habitID: morningWalk.id, dayKey: today, status: .complete, source: .user),
+            HabitDayRecord(habitID: noSugar.id, dayKey: today, status: .halfComplete, source: .auto),
+            HabitDayRecord(habitID: stretch.id, dayKey: today, status: .incomplete, source: .auto),
+            HabitDayRecord(habitID: journaling.id, dayKey: today, status: .incomplete, source: .auto),
+            HabitDayRecord(habitID: morningWalk.id, dayKey: yesterday, status: .complete, source: .user),
+            HabitDayRecord(habitID: noSugar.id, dayKey: yesterday, status: .failed, source: .user),
+            HabitDayRecord(habitID: stretch.id, dayKey: yesterday, status: .complete, source: .user),
+            HabitDayRecord(habitID: journaling.id, dayKey: yesterday, status: .halfComplete, source: .user)
+        ]
+
+        records.forEach { modelContext.insert($0) }
+
+        try? modelContext.save()
+    }
+}
+
+private struct ContentPreviewHost: View {
+    @Environment(\.modelContext) private var modelContext
+    @State private var hasSeeded = false
+
+    var body: some View {
+        ContentView()
+            .task {
+                guard !hasSeeded else {
+                    return
+                }
+                hasSeeded = true
+                ContentPreviewData.seedIfNeeded(in: modelContext)
+            }
+    }
+}
+
+private struct HabitEditorPreviewHost: View {
+    @Environment(\.modelContext) private var modelContext
+    @Query(sort: \Habit.title) private var habits: [Habit]
+    @State private var hasSeeded = false
+
+    var body: some View {
+        HabitEditorView(
+            habits: habits,
+            habitToEdit: nil,
+            cycleCheck: { _ in false },
+            onSave: { _ in },
+            onCancel: { }
+        )
+        .task {
+            guard !hasSeeded else {
+                return
+            }
+            hasSeeded = true
+            ContentPreviewData.seedIfNeeded(in: modelContext)
+        }
+    }
+}
+
+#Preview("Main - Seeded Habits") {
+    ContentPreviewHost()
         .modelContainer(for: [Habit.self, HabitDayRecord.self], inMemory: true)
 }
+
+#Preview("Sheet Content - Habit Editor") {
+    HabitEditorPreviewHost()
+        .modelContainer(for: [Habit.self, HabitDayRecord.self], inMemory: true)
+}
+#endif
